@@ -1,8 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:vibration/vibration.dart';
+import 'package:provider/provider.dart';
+import '../providers/auth_provider.dart';
+import '../providers/event_provider.dart';
+import '../services/api_service.dart';
+import '../utils/qr_parser.dart';
+import '../models/scan_response.dart';
+import '../widgets/charge_count_dialog.dart';
+import '../utils/error_mapper.dart';
 
 class ScannerScreen extends StatefulWidget {
+  static const routeName = '/scanner';
   const ScannerScreen({super.key});
 
   @override
@@ -10,10 +19,103 @@ class ScannerScreen extends StatefulWidget {
 }
 
 class _ScannerScreenState extends State<ScannerScreen> {
-  String scannedCode = '';
-  bool isProcessing = false;
-
+  bool _processing = false;
   final MobileScannerController cameraController = MobileScannerController();
+  String? _lastScanned;
+  DateTime? _lastScanTime;
+
+  Future<void> handleRawQr(String raw) async {
+    if (_processing) return;
+
+    // enforce cooldown (e.g., 1 second)
+    if (_lastScanTime != null &&
+        DateTime.now().difference(_lastScanTime!) <
+            const Duration(seconds: 1)) {
+      return;
+    }
+
+    // prevent double-scanning the same code
+    if (raw == _lastScanned) return;
+
+    _lastScanned = raw;
+    _lastScanTime = DateTime.now();
+    _processing = true;
+    HapticFeedback.vibrate();
+
+    final parsed = parseQrUrl(raw);
+    final eventProv = Provider.of<EventProvider>(context, listen: false);
+    final auth = Provider.of<AuthProvider>(context, listen: false);
+    final selectedEvent = eventProv.selectedEvent;
+
+    String? resultMessage;
+    bool isSuccess = false;
+
+    if (parsed == null) {
+      resultMessage = 'Unable to parse QR code';
+    } else if (selectedEvent == null) {
+      resultMessage = 'No event selected';
+    } else if (parsed.eventId != selectedEvent.id) {
+      resultMessage = 'QR code is for a different event';
+    } else {
+      try {
+        final api = ApiService(token: auth.token);
+        final ScanResponse scanResp = await api.scanQr(
+          parsed.eventId,
+          parsed.token,
+        );
+
+        if (scanResp.action == 'charge_count_needed') {
+          final chosen = await showDialog<int>(
+            context: context,
+            builder: (_) => ChargeCountDialog(
+              maxCount:
+                  scanResp.chargeCountNeeded ??
+                  (scanResp.chargeStatus.remaining ?? 1),
+              attendeeName: scanResp.attendee.name,
+            ),
+          );
+          if (chosen == null) {
+            _processing = false;
+            return; // user cancelled
+          }
+          await api.checkin(
+            parsed.eventId,
+            scanResp.attendee.id,
+            parsed.token,
+            chargeCount: chosen,
+          );
+          resultMessage =
+              '${scanResp.attendee.name} — checked in ($chosen used).';
+          isSuccess = true;
+        } else {
+          final checkinData = await api.checkin(
+            parsed.eventId,
+            scanResp.attendee.id,
+            parsed.token,
+          );
+          final remaining = checkinData['remaining_charges'];
+          resultMessage = '${scanResp.attendee.name} checked in';
+          if (remaining != null) resultMessage += ' — $remaining remaining';
+          isSuccess = true;
+        }
+      } on ApiException catch (e) {
+        resultMessage = mapApiErrorCodeToMessage(
+          e.body?['code'] as String?,
+          e.message,
+        );
+      } catch (e) {
+        resultMessage = 'Scan failed: $e';
+      }
+    }
+
+    _processing = false;
+
+    if (mounted) {
+      Navigator.of(
+        context,
+      ).pop({'success': isSuccess, 'message': resultMessage});
+    }
+  }
 
   @override
   void dispose() {
@@ -21,105 +123,34 @@ class _ScannerScreenState extends State<ScannerScreen> {
     super.dispose();
   }
 
-  // Called every time a barcode is detected
-  void _handleBarcode(BarcodeCapture capture) async {
-    if (isProcessing) return; // Prevent multiple triggers
-    isProcessing = true;
-
-    final barcode = capture.barcodes.first;
-    final value = barcode.rawValue ?? '';
-
-    if (value.isEmpty) {
-      isProcessing = false;
-      return;
-    }
-
-    setState(() => scannedCode = value);
-
-    // Vibrate the phone (if supported)
-    if (await Vibration.hasVibrator() ?? false) {
-      Vibration.vibrate(duration: 200);
-    }
-
-    // Allow scanning again after a short delay
-    await Future.delayed(const Duration(seconds: 1));
-    isProcessing = false;
-  }
-
   @override
   Widget build(BuildContext context) {
+    final eventProv = Provider.of<EventProvider>(context);
+    final selected = eventProv.selectedEvent;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('QR Scanner'),
+        title: Text(selected?.title ?? 'Scanner'),
         actions: [
-          // Flash Toggle
           IconButton(
-            icon: ValueListenableBuilder(
-              valueListenable: cameraController.torchState,
-              builder: (_, state, __) {
-                switch (state) {
-                  case TorchState.on:
-                    return const Icon(Icons.flash_on, color: Colors.yellow);
-                  default:
-                    return const Icon(Icons.flash_off);
-                }
-              },
-            ),
+            icon: const Icon(Icons.flash_on),
             onPressed: () => cameraController.toggleTorch(),
           ),
-
-          // Camera Switcher
           IconButton(
             icon: const Icon(Icons.cameraswitch),
             onPressed: () => cameraController.switchCamera(),
           ),
         ],
       ),
-
-      body: Stack(
-        children: [
-          // Camera Preview
-          MobileScanner(controller: cameraController, onDetect: _handleBarcode),
-
-          // Overlay box
-          Center(
-            child: Container(
-              width: 250,
-              height: 250,
-              decoration: BoxDecoration(
-                border: Border.all(
-                  color: Colors.white.withOpacity(0.8),
-                  width: 3,
-                ),
-                borderRadius: BorderRadius.circular(16),
-              ),
-            ),
-          ),
-
-          // Scanned result display
-          Positioned(
-            bottom: 40,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  vertical: 8,
-                  horizontal: 16,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.black54,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  scannedCode.isEmpty ? "Scan a QR Code" : scannedCode,
-                  style: const TextStyle(color: Colors.white, fontSize: 18),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            ),
-          ),
-        ],
+      body: MobileScanner(
+        controller: cameraController,
+        onDetect: (capture) {
+          final barcodes = capture.barcodes;
+          if (barcodes.isEmpty) return;
+          final raw = barcodes.first.rawValue ?? '';
+          if (raw.isEmpty) return;
+          handleRawQr(raw);
+        },
       ),
     );
   }
