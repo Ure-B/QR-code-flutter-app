@@ -27,14 +27,12 @@ class _ScannerScreenState extends State<ScannerScreen> {
   Future<void> handleRawQr(String raw) async {
     if (_processing) return;
 
-    // enforce cooldown (e.g., 1 second)
     if (_lastScanTime != null &&
         DateTime.now().difference(_lastScanTime!) <
             const Duration(seconds: 1)) {
-      return;
+      return; // cooldown
     }
 
-    // prevent double-scanning the same code
     if (raw == _lastScanned) return;
 
     _lastScanned = raw;
@@ -76,7 +74,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
           );
           if (chosen == null) {
             _processing = false;
-            return; // user cancelled
+            return;
           }
           await api.checkin(
             parsed.eventId,
@@ -129,29 +127,60 @@ class _ScannerScreenState extends State<ScannerScreen> {
     final selected = eventProv.selectedEvent;
 
     return Scaffold(
+      backgroundColor: const Color(0xFF1E2124),
       appBar: AppBar(
-        title: Text(selected?.title ?? 'Scanner'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.flash_on),
-            onPressed: () => cameraController.toggleTorch(),
+        title: Text(
+          selected?.title ?? 'Scanner',
+          style: const TextStyle(fontSize: 18),
+        ),
+        centerTitle: true,
+        backgroundColor: const Color(0xFF252A2E),
+      ),
+      body: Stack(
+        children: [
+          MobileScanner(
+            controller: cameraController,
+            onDetect: (capture) {
+              final barcodes = capture.barcodes;
+              if (barcodes.isEmpty) return;
+              final raw = barcodes.first.rawValue ?? '';
+              if (raw.isEmpty) return;
+              handleRawQr(raw);
+            },
           ),
-          IconButton(
-            icon: const Icon(Icons.cameraswitch),
-            onPressed: () => cameraController.switchCamera(),
+          // Overlay box for QR alignment
+          Center(
+            child: Container(
+              width: 250,
+              height: 250,
+              decoration: BoxDecoration(
+                border: Border.all(color: const Color(0xFFFA7315), width: 3),
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
           ),
         ],
       ),
-      body: MobileScanner(
-        controller: cameraController,
-        onDetect: (capture) {
-          final barcodes = capture.barcodes;
-          if (barcodes.isEmpty) return;
-          final raw = barcodes.first.rawValue ?? '';
-          if (raw.isEmpty) return;
-          handleRawQr(raw);
-        },
+      // Floating buttons bottom right
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FloatingActionButton(
+            heroTag: 'torch',
+            onPressed: () => cameraController.toggleTorch(),
+            backgroundColor: const Color(0xFFFA7315),
+            child: const Icon(Icons.flash_on),
+          ),
+          const SizedBox(height: 12),
+          FloatingActionButton(
+            heroTag: 'switchCam',
+            onPressed: () => cameraController.switchCamera(),
+            backgroundColor: const Color(0xFFFA7315),
+            child: const Icon(Icons.cameraswitch),
+          ),
+        ],
       ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
 }

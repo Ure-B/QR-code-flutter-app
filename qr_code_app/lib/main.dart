@@ -22,7 +22,51 @@ class EventPupApp extends StatelessWidget {
       ],
       child: MaterialApp(
         title: 'EventPup Scanner',
-        theme: ThemeData(primarySwatch: Colors.blue, useMaterial3: true),
+        theme: ThemeData(
+          primaryColor: const Color(0xFFFA7315),
+          scaffoldBackgroundColor: const Color(0xFF1A1A1A),
+          appBarTheme: const AppBarTheme(
+            backgroundColor: Color(0xFF000000),
+            foregroundColor: Colors.white,
+            elevation: 1,
+          ),
+          colorScheme: ColorScheme.fromSwatch().copyWith(
+            primary: const Color(0xFFFA7315),
+            secondary: const Color(0xFFFA7315),
+            error: const Color(0xFFDC3545),
+            brightness: Brightness.light,
+          ),
+          elevatedButtonTheme: ElevatedButtonThemeData(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFA7315),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 24),
+              textStyle: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          textTheme: const TextTheme(
+            titleLarge: TextStyle(
+              fontSize: 25,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFFFCD34D),
+            ),
+            bodyMedium: TextStyle(fontSize: 16, color: Colors.white),
+          ),
+          cardTheme: CardThemeData(
+            color: Colors.white,
+            elevation: 4,
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
         home: const RootDecider(),
         routes: {
           EventsScreen.routeName: (_) => const EventsScreen(),
